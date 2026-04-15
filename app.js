@@ -235,7 +235,13 @@ async function syncEmailsForPM(pm) {
   }
 
   // Build Gmail search query from ALL registered partner emails only
-  const allContactEmails = allClients.flatMap(c => c.contactEmails.length ? c.contactEmails : [c.primaryEmail]).filter(Boolean);
+  // Sanitise first — strip any entries that aren't plain email addresses
+  // (guards against corrupted data where full header text was stored)
+  const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+  const allContactEmails = allClients
+    .flatMap(c => c.contactEmails.length ? c.contactEmails : [c.primaryEmail])
+    .map(e => (e || '').trim().toLowerCase())
+    .filter(e => emailRegex.test(e));
   if (allContactEmails.length === 0) {
     showToast('Add partner contact emails before syncing.');
     return;
@@ -811,8 +817,11 @@ function openAddEmailModal(clientId) {
 }
 
 async function addContactEmail(clientId) {
-  const email = document.getElementById('newContactEmail').value.trim().toLowerCase();
-  if (!email || !email.includes('@')) { showToast('Please enter a valid email'); return; }
+  const raw = document.getElementById('newContactEmail').value.trim();
+  // Extract just the email address in case someone pastes a full header like "Name <email@domain.com>"
+  const match = raw.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/);
+  const email = match ? match[0].toLowerCase() : '';
+  if (!email) { showToast('Please enter a valid email address'); return; }
 
   try {
     const result = await db('addContactEmail', { client_id: clientId, email });

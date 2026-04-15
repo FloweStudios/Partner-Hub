@@ -1,6 +1,6 @@
 // ─── CONSTANTS ───────────────────────────────────────────────────────────────
 
-const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile';
 
 const DEPT_COLORS = {
   'Design':     'dept-design',
@@ -176,10 +176,17 @@ async function connectMyGmail() {
       });
       const profile = await profileRes.json();
 
+      // If Google didn't return an email the token scope was rejected — bail out
+      if (!profile.email) {
+        showToast('Could not read Google profile — try reconnecting.');
+        console.error('Google userinfo response:', profile);
+        return;
+      }
+
       const pm = {
-        name: profile.name,
+        name: profile.name || profile.email.split('@')[0],
         email: profile.email,
-        initials: initials(profile.name),
+        initials: initials(profile.name || profile.email),
         accessToken: tokenResponse.access_token,
         tokenExpiry: Date.now() + (tokenResponse.expires_in * 1000),
         connectedAt: new Date().toISOString(),

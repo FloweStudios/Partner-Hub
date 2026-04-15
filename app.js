@@ -238,10 +238,16 @@ async function syncEmailsForPM(pm) {
   // Sanitise first — strip any entries that aren't plain email addresses
   // (guards against corrupted data where full header text was stored)
   const emailRegex = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
-  const allContactEmails = allClients
-    .flatMap(c => c.contactEmails.length ? c.contactEmails : [c.primaryEmail])
-    .map(e => (e || '').trim().toLowerCase())
-    .filter(e => emailRegex.test(e));
+  const allContactEmails = [...new Set(
+    allClients
+      .flatMap(c => {
+        const emails = c.contactEmails.length ? c.contactEmails : [];
+        if (c.primaryEmail) emails.push(c.primaryEmail);
+        return emails;
+      })
+      .map(e => (e || '').trim().toLowerCase())
+      .filter(e => emailRegex.test(e))
+  )];
   if (allContactEmails.length === 0) {
     showToast('Add partner contact emails before syncing.');
     return;
@@ -250,12 +256,13 @@ async function syncEmailsForPM(pm) {
   // Gmail query: separate from:/to: clauses — the {from:x to:x} shorthand is not supported
   const fromClauses = allContactEmails.map(e => `from:${e}`);
   const toClauses   = allContactEmails.map(e => `to:${e}`);
-  const query = `(${[...fromClauses, ...toClauses].join(' OR ')}) newer_than:90`;
+  const query = `${[...fromClauses, ...toClauses].join(' OR ')}`;
 
   showToast(`Syncing ${pm.name}'s emails...`);
 
   try {
-    console.log('[Sync] Gmail query:', query);
+    console.log('[Sync] Contact emails:', allContactEmails);
+  console.log('[Sync] Gmail query:', query);
 
     const listRes = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(query)}&maxResults=50`,

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Partner Hub — Longhouse</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ─── ADD CLIENT MODAL ─── -->
+<div class="modal-overlay" id="addClientModal">
+  <div class="modal">
+    <div class="modal-title">Add new client</div>
+    <div class="modal-sub">Connect a client to start tracking communications across your team.</div>
+    <div class="form-group">
+      <label class="form-label">Company name</label>
+      <input class="form-input" type="text" placeholder="e.g. Acme Corp" id="newClientName">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Website</label>
+      <input class="form-input" type="text" placeholder="e.g. acmecorp.com" id="newClientSite">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Primary contact email</label>
+      <input class="form-input" type="email" placeholder="e.g. marcus@acmecorp.com" id="newClientEmail">
+    </div>
+    <div class="form-group">
+      <label class="form-label">Departments involved</label>
+      <input class="form-input" type="text" placeholder="e.g. Design, Paid Media, SEO" id="newClientDepts">
+    </div>
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-save" onclick="addClient()">Add client</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── APP SHELL ─── -->
+<div class="app">
+
+  <!-- HEADER -->
+  <header class="header">
+    <div class="header-logo">
+      <div class="header-logo-icon">L</div>
+      <div>
+        <div class="header-logo-text">Partner Hub</div>
+      </div>
+    </div>
+
+    <div class="header-sep"></div>
+
+    <div class="header-search">
+      <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+      <input type="text" placeholder="Search clients, emails, threads..." id="globalSearch" oninput="filterClients(this.value)">
+    </div>
+
+    <div class="header-actions">
+      <button class="header-btn" title="Notifications" onclick="showToast('3 unread alerts')">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+        <span class="notif-dot"></span>
+      </button>
+      <div class="header-avatar" title="Your account">JD</div>
+    </div>
+  </header>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Navigation</div>
+      <nav class="sidebar-nav">
+        <div class="nav-item active" onclick="setNav(this)">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          All clients
+          <span class="nav-badge" id="clientCount">4</span>
+        </div>
+        <div class="nav-item" onclick="setNav(this)">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+          Recent emails
+        </div>
+        <div class="nav-item" onclick="setNav(this)">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Silence alerts
+          <span class="nav-badge" id="alertBadge">2</span>
+        </div>
+        <div class="nav-item" onclick="setNav(this)">
+          <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          Activity feed
+        </div>
+      </nav>
+    </div>
+
+    <div class="sidebar-divider"></div>
+
+    <div class="client-list">
+      <div class="client-list-header">
+        <div class="sidebar-label" style="margin-bottom:0">Clients</div>
+        <div class="client-add-btn" onclick="openModal()" title="Add client">+</div>
+      </div>
+      <div id="clientList"></div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main" id="main">
+    <!-- populated by JS -->
+  </main>
+
+</div>
+
+<!-- TOAST -->
+<div id="toast" style="position:fixed;bottom:24px;right:24px;background:var(--blue-3);border:1px solid rgba(34,187,242,0.25);border-radius:var(--radius-sm);padding:12px 18px;font-size:13px;color:var(--white);font-weight:600;z-index:999;opacity:0;transform:translateY(8px);transition:all 0.25s;pointer-events:none;font-family:var(--font)"></div>
+
+<script src="app.js"></script>
+</body>
+</html>

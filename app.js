@@ -227,15 +227,17 @@ async function syncEmailsForPM(pm) {
     return;
   }
 
-  // Build Gmail search query from ALL registered client emails only
+  // Build Gmail search query from ALL registered partner emails only
   const allContactEmails = allClients.flatMap(c => c.contactEmails.length ? c.contactEmails : [c.primaryEmail]).filter(Boolean);
   if (allContactEmails.length === 0) {
-    showToast('Add client contact emails before syncing.');
+    showToast('Add partner contact emails before syncing.');
     return;
   }
 
-  const emailQuery = allContactEmails.map(e => `{from:${e} to:${e}}`).join(' OR ');
-  const query = `(${emailQuery}) newer_than:30d`;
+  // Gmail query: separate from:/to: clauses — the {from:x to:x} shorthand is not supported
+  const fromClauses = allContactEmails.map(e => `from:${e}`);
+  const toClauses   = allContactEmails.map(e => `to:${e}`);
+  const query = `(${[...fromClauses, ...toClauses].join(' OR ')}) newer_than:30d`;
 
   showToast(`Syncing ${pm.name}'s emails...`);
 
@@ -266,9 +268,17 @@ async function syncEmailsForPM(pm) {
 
     threads.forEach(thread => {
       const messages = thread.messages || [];
-      const lastMsg = messages[messages.length - 1];
-      if (!lastMsg) return;
+      if (!messages.length) return;
 
+      // Check ALL messages in thread for client email involvement, not just the last
+      const allInvolved = messages.flatMap(m => {
+        const hdrs = m.payload?.headers || [];
+        const get  = n => hdrs.find(h => h.name === n)?.value || '';
+        return extractEmails(`${get('From')} ${get('To')} ${get('Cc')}`);
+      });
+
+      // Use last message for display (subject, date, preview, sender)
+      const lastMsg = messages[messages.length - 1];
       const headers = lastMsg.payload?.headers || [];
       const getHeader = name => headers.find(h => h.name === name)?.value || '';
 
@@ -278,7 +288,7 @@ async function syncEmailsForPM(pm) {
       const dateStr    = getHeader('Date');
       const snippet    = lastMsg.snippet || '';
 
-      const involvedEmails = extractEmails(`${fromHeader} ${toHeader}`);
+      const involvedEmails = allInvolved;
 
       const matchedClient = allClients.find(c =>
         (c.contactEmails.length ? c.contactEmails : [c.primaryEmail])
@@ -370,12 +380,13 @@ function renderConnectedPMs() {
 
 // ─── CLIENT LIST ─────────────────────────────────────────────────────────────
 
-function renderClientList(list) {
+function renderClientList(list, updateCount = true) {
   const el = document.getElementById('clientList');
-  document.getElementById('clientCount').textContent = list.length;
+  // Always show TOTAL partner count in badge, even when list is filtered
+  if (updateCount) document.getElementById('clientCount').textContent = allClients.length;
 
   if (list.length === 0) {
-    el.innerHTML = `<div style="padding:24px 8px;font-size:12px;color:rgba(213,232,247,0.3);text-align:center;">No clients yet — add your first one.</div>`;
+    el.innerHTML = `<div style="padding:24px 8px;font-size:12px;color:rgba(213,232,247,0.3);text-align:center;">No partners here.</div>`;
     return;
   }
 
@@ -722,10 +733,10 @@ function closeModal() {
 }
 
 async function addClient() {
-  const name     = document.getElementById('newClientName').value.trim();
-  const site     = document.getElementById('newClientSite').value.trim();
-  const email    = document.getElementById('newClientEmail').value.trim().toLowerCase();
-  const deptsRaw = document.getElementById('newClientDepts').value.trim();
+  const name     = document.getElementById('newPartnerName').value.trim();
+  const site     = document.getElementById('newPartnerSite').value.trim();
+  const email    = document.getElementById('newPartnerEmail').value.trim().toLowerCase();
+  const deptsRaw = document.getElementById('newPartnerDepts').value.trim();
 
   if (!name) { showToast('Please enter a company name'); return; }
 
@@ -754,7 +765,7 @@ async function addClient() {
     showToast(`${name} added`);
 
   } catch {
-    showToast('Could not save client — check connection');
+    showToast('Could not save partner — check connection');
   }
 }
 
@@ -799,12 +810,12 @@ async function addContactEmail(clientId) {
 function restoreAddClientModal() {
   document.getElementById('addClientModal').innerHTML = `
     <div class="modal">
-      <div class="modal-title">Add new client</div>
-      <div class="modal-sub">Connect a client to start tracking communications across your team.</div>
-      <div class="form-group"><label class="form-label">Company name</label><input class="form-input" type="text" placeholder="e.g. Acme Corp" id="newClientName"></div>
-      <div class="form-group"><label class="form-label">Website</label><input class="form-input" type="text" placeholder="e.g. acmecorp.com" id="newClientSite"></div>
-      <div class="form-group"><label class="form-label">Primary contact email</label><input class="form-input" type="email" placeholder="e.g. marcus@acmecorp.com" id="newClientEmail"></div>
-      <div class="form-group"><label class="form-label">Departments involved</label><input class="form-input" type="text" placeholder="e.g. Design, Paid Media, SEO" id="newClientDepts"></div>
+      <div class="modal-title">Add new partner</div>
+      <div class="modal-sub">Add a partner to start tracking communications across your team.</div>
+      <div class="form-group"><label class="form-label">Company name</label><input class="form-input" type="text" placeholder="e.g. Acme Corp" id="newPartnerName"></div>
+      <div class="form-group"><label class="form-label">Website</label><input class="form-input" type="text" placeholder="e.g. acmecorp.com" id="newPartnerSite"></div>
+      <div class="form-group"><label class="form-label">Primary contact email</label><input class="form-input" type="email" placeholder="e.g. marcus@acmecorp.com" id="newPartnerEmail"></div>
+      <div class="form-group"><label class="form-label">Departments involved</label><input class="form-input" type="text" placeholder="e.g. Design, Paid Media, SEO" id="newPartnerDepts"></div>
       <div class="modal-actions">
         <button class="btn-cancel" onclick="closeModal()">Cancel</button>
         <button class="btn-save" onclick="addClient()">Add client</button>
@@ -820,32 +831,43 @@ function setNav(el) {
   el.classList.add('active');
   const label = el.textContent.trim();
 
-  if (label.includes('All clients')) {
+  if (label.includes('All partners')) {
     renderClientList(allClients);
     return;
   }
   if (label.includes('Silence alerts')) {
     const silent = allClients.filter(c => c.silenceDays);
-    renderClientList(silent);
+    // false = don't update count badge (keep showing total)
+    renderClientList(silent, false);
     document.getElementById('main').innerHTML = `
       <div class="empty-state">
         <div class="empty-icon"><svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
-        <div class="empty-title">${silent.length} client${silent.length !== 1 ? 's' : ''} flagged</div>
-        <div class="empty-sub">Select a client to view their alert.</div>
+        <div class="empty-title">${silent.length} partner${silent.length !== 1 ? 's' : ''} flagged</div>
+        <div class="empty-sub">Select a partner to view their silence alert.</div>
       </div>`;
     return;
   }
-
-  const emptyMsg = label.includes('Recent emails')
-    ? 'Connect a Gmail account from the sidebar to pull in emails matching your client list.'
-    : 'A live feed of all client emails across every department will appear here once Gmail is connected.';
-
-  document.getElementById('main').innerHTML = `
-    <div class="empty-state">
-      <div class="empty-icon"><svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
-      <div class="empty-title">${escHtml(label)}</div>
-      <div class="empty-sub">${emptyMsg}</div>
-    </div>`;
+  if (label.includes('Recent emails')) {
+    // Keep full partner list in sidebar, just change main panel
+    renderClientList(allClients, false);
+    document.getElementById('main').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon"><svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div>
+        <div class="empty-title">Recent emails</div>
+        <div class="empty-sub">Connect a Gmail account from the sidebar to pull in emails matching your partner list.</div>
+      </div>`;
+    return;
+  }
+  if (label.includes('Activity')) {
+    renderClientList(allClients, false);
+    document.getElementById('main').innerHTML = `
+      <div class="empty-state">
+        <div class="empty-icon"><svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div>
+        <div class="empty-title">Activity feed</div>
+        <div class="empty-sub">A live feed of all partner emails across every department will appear here once Gmail is connected.</div>
+      </div>`;
+    return;
+  }
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────

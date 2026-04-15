@@ -54,23 +54,23 @@
 <!-- ─── ADD CLIENT MODAL ─── -->
 <div class="modal-overlay" id="addClientModal">
   <div class="modal">
-    <div class="modal-title">Add new client</div>
-    <div class="modal-sub">Connect a client to start tracking communications across your team.</div>
+    <div class="modal-title">Add new partner</div>
+    <div class="modal-sub">Add a partner to start tracking communications across your team.</div>
     <div class="form-group">
       <label class="form-label">Company name</label>
-      <input class="form-input" type="text" placeholder="e.g. Acme Corp" id="newClientName">
+      <input class="form-input" type="text" placeholder="e.g. Acme Corp" id="newPartnerName">
     </div>
     <div class="form-group">
       <label class="form-label">Website</label>
-      <input class="form-input" type="text" placeholder="e.g. acmecorp.com" id="newClientSite">
+      <input class="form-input" type="text" placeholder="e.g. acmecorp.com" id="newPartnerSite">
     </div>
     <div class="form-group">
       <label class="form-label">Primary contact email</label>
-      <input class="form-input" type="email" placeholder="e.g. marcus@acmecorp.com" id="newClientEmail">
+      <input class="form-input" type="email" placeholder="e.g. marcus@acmecorp.com" id="newPartnerEmail">
     </div>
     <div class="form-group">
       <label class="form-label">Departments involved</label>
-      <input class="form-input" type="text" placeholder="e.g. Design, Paid Media, SEO" id="newClientDepts">
+      <input class="form-input" type="text" placeholder="e.g. Design, Paid Media, SEO" id="newPartnerDepts">
     </div>
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">Cancel</button>
@@ -114,7 +114,7 @@
       <nav class="sidebar-nav">
         <div class="nav-item active" onclick="setNav(this)">
           <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-          All clients
+          All partners
           <span class="nav-badge" id="clientCount">4</span>
         </div>
         <div class="nav-item" onclick="setNav(this)">
@@ -137,7 +137,7 @@
 
     <div class="client-list">
       <div class="client-list-header">
-        <div class="sidebar-label" style="margin-bottom:0">Clients</div>
+        <div class="sidebar-label" style="margin-bottom:0">Partners</div>
         <div class="client-add-btn" onclick="openModal()" title="Add client">+</div>
       </div>
       <div id="clientList"></div>
@@ -146,7 +146,7 @@
     <!-- ─── GMAIL CONNECT PANEL ─── -->
     <!-- Each PM clicks this themselves — no admin can force it.
          Google's own consent screen appears and the PM chooses to allow or deny.
-         We request read-only access and only search for emails matching client addresses. -->
+         We request read-only access and only search for emails matching partner addresses. -->
     <div class="gmail-connect-panel">
       <div class="gmail-connect-label">Gmail connections</div>
       <div id="pmStatus"></div>
@@ -155,7 +155,7 @@
         Connect my Gmail
       </button>
       <div class="consent-note">
-        You choose what to share. We only read emails involving your registered client addresses — nothing else is accessed.
+        You choose what to share. We only read emails involving your registered partner addresses — nothing else is accessed.
       </div>
     </div>
 

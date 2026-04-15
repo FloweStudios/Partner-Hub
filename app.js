@@ -1,4 +1,15 @@
-// ─── DATA ───────────────────────────────────────────────────────────────────
+// ─── GMAIL OAUTH CONFIG ──────────────────────────────────────────────────────
+// Replace with your own Google OAuth Client ID from console.cloud.google.com
+// Scopes are read-only: we only ever read emails, never send or modify.
+const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
+
+// ─── PM REGISTRY ─────────────────────────────────────────────────────────────
+// Each PM who signs in gets an entry here. Stored in localStorage per-session.
+// We only store: name, email, accessToken, tokenExpiry. Nothing else.
+let connectedPMs = JSON.parse(localStorage.getItem('connectedPMs') || '[]');
+
+// ─── DATA ────────────────────────────────────────────────────────────────────
 
 const DEPT_COLORS = {
   'Design':     'dept-design',
@@ -10,6 +21,8 @@ const DEPT_COLORS = {
 
 const AVATAR_COLORS = ['av-navy','av-teal','av-cyan','av-blue','av-deep'];
 
+// Each client has a `contactEmails` array — these are the ONLY email addresses
+// we search Gmail for. Nothing outside this list is ever pulled.
 let clients = [
   {
     id: 1,
@@ -19,6 +32,8 @@ let clients = [
     type: 'Enterprise',
     primaryContact: 'Marcus Webb',
     primaryEmail: 'marcus@acmecorp.com',
+    // All known email addresses for this client. Add CCs, aliases, extra contacts here.
+    contactEmails: ['marcus@acmecorp.com', 'accounts@acmecorp.com'],
     depts: ['Design','Paid Media','SEO'],
     avatarColor: 'av-navy',
     lastContact: '2h ago',
@@ -31,6 +46,7 @@ let clients = [
         senderInitials: 'SR',
         senderColor: 'av-teal',
         dept: 'Design',
+        pmEmail: 'sarah@longhouse.com',
         direction: 'outbound',
         time: '2h ago',
         dateGroup: 'Today',
@@ -43,6 +59,7 @@ let clients = [
         senderInitials: 'MW',
         senderColor: 'av-blue',
         dept: 'Client',
+        pmEmail: null,
         direction: 'inbound',
         time: '5h ago',
         dateGroup: 'Today',
@@ -55,6 +72,7 @@ let clients = [
         senderInitials: 'JL',
         senderColor: 'av-cyan',
         dept: 'Paid Media',
+        pmEmail: 'jamie@longhouse.com',
         direction: 'outbound',
         time: 'Yesterday 3:12pm',
         dateGroup: 'Yesterday',
@@ -67,6 +85,7 @@ let clients = [
         senderInitials: 'PK',
         senderColor: 'av-navy',
         dept: 'SEO',
+        pmEmail: 'priya@longhouse.com',
         direction: 'outbound',
         time: 'Yesterday 10:05am',
         dateGroup: 'Yesterday',
@@ -79,6 +98,7 @@ let clients = [
         senderInitials: 'MW',
         senderColor: 'av-blue',
         dept: 'Client',
+        pmEmail: null,
         direction: 'inbound',
         time: 'Mon 9:30am',
         dateGroup: 'This week',
@@ -100,6 +120,7 @@ let clients = [
     type: 'Growth',
     primaryContact: 'Yuki Tanaka',
     primaryEmail: 'yuki@novarainc.com',
+    contactEmails: ['yuki@novarainc.com'],
     depts: ['SEO','Dev'],
     avatarColor: 'av-teal',
     lastContact: 'Yesterday',
@@ -112,6 +133,7 @@ let clients = [
         senderInitials: 'PK',
         senderColor: 'av-navy',
         dept: 'SEO',
+        pmEmail: 'priya@longhouse.com',
         direction: 'outbound',
         time: 'Yesterday 2:00pm',
         dateGroup: 'Yesterday',
@@ -124,6 +146,7 @@ let clients = [
         senderInitials: 'DM',
         senderColor: 'av-cyan',
         dept: 'Dev',
+        pmEmail: 'dan@longhouse.com',
         direction: 'outbound',
         time: 'Last week',
         dateGroup: 'Last week',
@@ -144,6 +167,7 @@ let clients = [
     type: 'Enterprise',
     primaryContact: 'Claire Foster',
     primaryEmail: 'claire@brighthorizons.co',
+    contactEmails: ['claire@brighthorizons.co', 'claire.foster@brighthorizons.co'],
     depts: ['Design','Paid Media'],
     avatarColor: 'av-blue',
     lastContact: '3 days ago',
@@ -156,6 +180,7 @@ let clients = [
         senderInitials: 'SR',
         senderColor: 'av-teal',
         dept: 'Design',
+        pmEmail: 'sarah@longhouse.com',
         direction: 'outbound',
         time: '3 days ago',
         dateGroup: 'This week',
@@ -174,6 +199,7 @@ let clients = [
     type: 'Starter',
     primaryContact: 'Ben Ashford',
     primaryEmail: 'ben@slateandco.com',
+    contactEmails: ['ben@slateandco.com'],
     depts: ['Paid Media'],
     avatarColor: 'av-deep',
     lastContact: '1 week ago',
@@ -186,6 +212,7 @@ let clients = [
         senderInitials: 'JL',
         senderColor: 'av-cyan',
         dept: 'Paid Media',
+        pmEmail: 'jamie@longhouse.com',
         direction: 'outbound',
         time: '1 week ago',
         dateGroup: 'Last week',
@@ -205,9 +232,302 @@ let allClients = [...clients];
 // ─── INIT ────────────────────────────────────────────────────────────────────
 
 document.addEventListener('DOMContentLoaded', () => {
-  renderClientList(clients);
-  selectClient(clients[0].id);
+  loadGoogleIdentityScript(() => {
+    renderConnectedPMs();
+    renderClientList(allClients);
+    selectClient(allClients[0].id);
+  });
 });
+
+// ─── GOOGLE IDENTITY SERVICES ─────────────────────────────────────────────────
+
+function loadGoogleIdentityScript(cb) {
+  if (window.google && window.google.accounts) { cb(); return; }
+  const s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client';
+  s.onload = cb;
+  s.onerror = () => {
+    // Script failed to load (e.g. no internet) — still boot the app with sample data
+    console.warn('Google Identity script could not load. Running in demo mode.');
+    cb();
+  };
+  document.head.appendChild(s);
+}
+
+// ─── OAUTH CONSENT FLOW ───────────────────────────────────────────────────────
+// This triggers an individual Google OAuth popup for the PM clicking "Connect my Gmail".
+// Each PM explicitly chooses to grant read-only access to their own inbox.
+// We never access any inbox that hasn't been individually authorised.
+
+function connectMyGmail() {
+  if (!window.google || !window.google.accounts) {
+    showToast('Google sign-in unavailable. Check your Client ID config.');
+    return;
+  }
+
+  // The consent screen will show:
+  // "Partner Hub wants to: View your email messages and settings"
+  // The PM clicks Allow or Deny — fully in their control.
+  const client = google.accounts.oauth2.initTokenClient({
+    client_id: GOOGLE_CLIENT_ID,
+    scope: GMAIL_SCOPE,
+    callback: (tokenResponse) => {
+      if (tokenResponse.error) {
+        showToast('Gmail connection cancelled.');
+        return;
+      }
+      // Fetch the PM's profile so we can store their name + email
+      fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
+      })
+      .then(r => r.json())
+      .then(profile => {
+        const pm = {
+          name: profile.name,
+          email: profile.email,
+          initials: initials(profile.name),
+          accessToken: tokenResponse.access_token,
+          // Tokens expire in 1 hour — track this so we know when to prompt refresh
+          tokenExpiry: Date.now() + (tokenResponse.expires_in * 1000),
+          connectedAt: new Date().toISOString(),
+        };
+        // Replace if already exists (re-auth), otherwise add
+        const idx = connectedPMs.findIndex(p => p.email === pm.email);
+        if (idx > -1) connectedPMs[idx] = pm;
+        else connectedPMs.push(pm);
+
+        // Persist to localStorage (token only lives for the session anyway)
+        localStorage.setItem('connectedPMs', JSON.stringify(connectedPMs));
+
+        renderConnectedPMs();
+        showToast(`${pm.name}'s Gmail connected`);
+
+        // Now sync emails for this PM
+        syncEmailsForPM(pm);
+      });
+    }
+  });
+
+  client.requestAccessToken({ prompt: 'consent' });
+}
+
+function disconnectPM(email) {
+  connectedPMs = connectedPMs.filter(p => p.email !== email);
+  localStorage.setItem('connectedPMs', JSON.stringify(connectedPMs));
+  renderConnectedPMs();
+  showToast('Gmail disconnected');
+}
+
+// ─── EMAIL SYNC ───────────────────────────────────────────────────────────────
+// Core logic: for a given PM's Gmail, search ONLY for emails involving
+// addresses listed in clients[].contactEmails. Nothing else is fetched.
+
+async function syncEmailsForPM(pm) {
+  if (!pm.accessToken) return;
+
+  // Check token hasn't expired
+  if (Date.now() > pm.tokenExpiry) {
+    showToast(`${pm.name}'s Gmail token expired — please reconnect.`);
+    return;
+  }
+
+  // Build a Gmail search query from ALL known client emails.
+  // This is the filtering step — Gmail only returns threads that match
+  // at least one of these addresses. We never fetch anything else.
+  const allClientEmails = allClients.flatMap(c => c.contactEmails || [c.primaryEmail]);
+  const emailQuery = allClientEmails.map(e => `{from:${e} to:${e}}`).join(' OR ');
+  const query = `(${emailQuery}) newer_than:30d`;
+
+  showToast(`Syncing ${pm.name}'s emails...`);
+
+  try {
+    // Step 1: Get list of matching thread IDs
+    const listRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(query)}&maxResults=50`,
+      { headers: { Authorization: `Bearer ${pm.accessToken}` } }
+    );
+    const listData = await listRes.json();
+    if (!listData.threads || listData.threads.length === 0) {
+      showToast(`No matching emails found for ${pm.name}`);
+      return;
+    }
+
+    // Step 2: Fetch each thread's metadata
+    const threads = await Promise.all(
+      listData.threads.map(t =>
+        fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/threads/${t.id}?format=metadata&metadataHeaders=From&metadataHeaders=To&metadataHeaders=Subject&metadataHeaders=Date`,
+          { headers: { Authorization: `Bearer ${pm.accessToken}` } }
+        ).then(r => r.json())
+      )
+    );
+
+    // Step 3: Match each thread to a client by checking if any message
+    // involves one of that client's registered email addresses
+    let newThreadCount = 0;
+
+    threads.forEach(thread => {
+      const messages = thread.messages || [];
+      const lastMsg = messages[messages.length - 1];
+      if (!lastMsg) return;
+
+      const headers = lastMsg.payload?.headers || [];
+      const getHeader = name => headers.find(h => h.name === name)?.value || '';
+
+      const fromHeader = getHeader('From');
+      const toHeader = getHeader('To');
+      const subject = getHeader('Subject');
+      const dateStr = getHeader('Date');
+      const snippet = lastMsg.snippet || '';
+
+      // Extract email addresses from From/To headers
+      const involvedEmails = extractEmails(`${fromHeader} ${toHeader}`);
+
+      // Find which client this thread belongs to
+      const matchedClient = allClients.find(c =>
+        (c.contactEmails || [c.primaryEmail]).some(ce =>
+          involvedEmails.includes(ce.toLowerCase())
+        )
+      );
+
+      if (!matchedClient) return; // Should never happen given our query, but be safe
+
+      // Determine direction: outbound if the PM sent it, inbound if client sent it
+      const pmEmailLower = pm.email.toLowerCase();
+      const fromEmail = extractEmails(fromHeader)[0] || '';
+      const isOutbound = fromEmail === pmEmailLower;
+
+      // Avoid duplicates — check if we already have this Gmail thread ID
+      const alreadyExists = matchedClient.threads.some(t => t.gmailThreadId === thread.id);
+      if (alreadyExists) return;
+
+      // Build a display-friendly date
+      const date = new Date(dateStr);
+      const timeDisplay = formatRelativeTime(date);
+      const dateGroup = getDateGroup(date);
+
+      // Build the thread entry
+      const pmInitials = pm.initials || initials(pm.name);
+      const newThread = {
+        id: `gmail-${thread.id}`,
+        gmailThreadId: thread.id,
+        senderName: isOutbound ? pm.name : getHeader('From').split('<')[0].trim() || getHeader('From'),
+        senderInitials: isOutbound ? pmInitials : initials(getHeader('From').split('<')[0].trim() || 'CL'),
+        senderColor: isOutbound ? 'av-teal' : 'av-blue',
+        dept: isOutbound ? guessDeptFromPM(pm.email) : 'Client',
+        pmEmail: isOutbound ? pm.email : null,
+        direction: isOutbound ? 'outbound' : 'inbound',
+        time: timeDisplay,
+        dateGroup,
+        subject: subject || '(no subject)',
+        preview: snippet,
+        rawDate: date.getTime(),
+      };
+
+      // Prepend to the client's thread list
+      matchedClient.threads.unshift(newThread);
+      matchedClient.lastContact = timeDisplay;
+      matchedClient.unread = true;
+      newThreadCount++;
+    });
+
+    // Re-sort threads by date
+    allClients.forEach(c => {
+      c.threads.sort((a, b) => (b.rawDate || 0) - (a.rawDate || 0));
+    });
+
+    renderClientList(allClients);
+    if (activeClientId) {
+      const c = allClients.find(x => x.id === activeClientId);
+      if (c) renderClientView(c);
+    }
+
+    showToast(`Synced ${newThreadCount} new thread${newThreadCount !== 1 ? 's' : ''} for ${pm.name}`);
+
+  } catch (err) {
+    console.error('Gmail sync error:', err);
+    showToast(`Sync failed for ${pm.name} — check console`);
+  }
+}
+
+// ─── HELPERS FOR SYNC ─────────────────────────────────────────────────────────
+
+function extractEmails(str) {
+  return (str.match(/[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g) || [])
+    .map(e => e.toLowerCase());
+}
+
+function guessDeptFromPM(email) {
+  // Once you have real PM profiles in Supabase, this pulls from there.
+  // For now, you can hardcode your team's email → dept mapping here:
+  const map = {
+    'sarah@longhouse.com':  'Design',
+    'jamie@longhouse.com':  'Paid Media',
+    'priya@longhouse.com':  'SEO',
+    'dan@longhouse.com':    'Dev',
+  };
+  return map[email.toLowerCase()] || 'Team';
+}
+
+function formatRelativeTime(date) {
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMins / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffMins < 2)   return 'Just now';
+  if (diffMins < 60)  return `${diffMins}m ago`;
+  if (diffHours < 24) return `${diffHours}h ago`;
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7)   return `${diffDays} days ago`;
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+}
+
+function getDateGroup(date) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const diffDays = Math.round((today - d) / 86400000);
+
+  if (diffDays === 0) return 'Today';
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays <= 7)  return 'This week';
+  if (diffDays <= 14) return 'Last week';
+  return date.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+}
+
+// ─── RENDER CONNECTED PMs ─────────────────────────────────────────────────────
+
+function renderConnectedPMs() {
+  const el = document.getElementById('pmStatus');
+  if (!el) return;
+
+  if (connectedPMs.length === 0) {
+    el.innerHTML = `
+      <div style="font-size:11px;color:rgba(213,232,247,0.35);padding:8px 8px 4px">No Gmail connections yet</div>
+    `;
+    return;
+  }
+
+  el.innerHTML = connectedPMs.map(pm => {
+    const expired = Date.now() > pm.tokenExpiry;
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:var(--radius-sm);">
+        <div style="width:24px;height:24px;border-radius:50%;background:${expired ? 'rgba(239,159,39,0.2)' : 'rgba(34,187,242,0.15)'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:${expired ? '#EF9F27' : 'var(--accent-1)'};flex-shrink:0;">${pm.initials}</div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:12px;font-weight:600;color:${expired ? '#EF9F27' : 'var(--white)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(pm.name)}</div>
+          <div style="font-size:10px;color:rgba(213,232,247,0.4);">${expired ? 'Token expired' : 'Connected'}</div>
+        </div>
+        ${expired
+          ? `<button onclick="connectMyGmail()" style="font-size:10px;font-weight:700;color:#EF9F27;background:rgba(239,159,39,0.1);border:1px solid rgba(239,159,39,0.2);border-radius:4px;padding:3px 7px;cursor:pointer;">Refresh</button>`
+          : `<button onclick="syncEmailsForPM(connectedPMs.find(p=>p.email==='${pm.email}'))" style="font-size:10px;font-weight:600;color:var(--accent-1);background:rgba(34,187,242,0.08);border:1px solid rgba(34,187,242,0.15);border-radius:4px;padding:3px 7px;cursor:pointer;">Sync</button>`
+        }
+        <button onclick="disconnectPM('${pm.email}')" title="Disconnect" style="font-size:14px;color:rgba(213,232,247,0.25);background:none;border:none;cursor:pointer;line-height:1;padding:0 2px;">×</button>
+      </div>
+    `;
+  }).join('');
+}
 
 // ─── CLIENT LIST ─────────────────────────────────────────────────────────────
 
@@ -266,6 +586,11 @@ function renderClientView(c) {
     `<span class="dept-tag ${DEPT_COLORS[d] || ''}">${d}</span>`
   ).join('');
 
+  // Show all known contact emails for this client
+  const emailPillsHtml = (c.contactEmails || [c.primaryEmail]).map(e =>
+    `<span style="font-size:11px;padding:2px 8px;border-radius:99px;background:rgba(213,232,247,0.06);border:1px solid rgba(213,232,247,0.1);color:rgba(213,232,247,0.5);">${escHtml(e)}</span>`
+  ).join('');
+
   const statsHtml = `
     <div class="stats-row">
       <div class="stat-card">
@@ -302,12 +627,13 @@ function renderClientView(c) {
           <div>
             <div class="client-header-name">${c.name}</div>
             <div class="client-header-meta">${c.site} · ${c.type} · Partner since ${c.since}</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">${emailPillsHtml}</div>
           </div>
         </div>
         <div class="client-header-actions">
-          <button class="btn-sm btn-outline" onclick="showToast('Opening email to ${c.primaryContact}...')">
-            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            Email client
+          <button class="btn-sm btn-outline" onclick="openAddEmailModal(${c.id})">
+            <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add email
           </button>
           <button class="btn-sm btn-accent" onclick="switchTab('brief')">
             <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
@@ -315,7 +641,7 @@ function renderClientView(c) {
           </button>
         </div>
       </div>
-      <div class="dept-tags">${deptTagsHtml}</div>
+      <div class="dept-tags" style="margin-top:12px;">${deptTagsHtml}</div>
       ${statsHtml}
     </div>
 
@@ -331,6 +657,73 @@ function renderClientView(c) {
   `;
 
   renderTab(c);
+}
+
+// ─── ADD EMAIL TO CLIENT ──────────────────────────────────────────────────────
+
+function openAddEmailModal(clientId) {
+  const c = allClients.find(x => x.id === clientId);
+  const overlay = document.getElementById('addClientModal');
+  overlay.querySelector('.modal-title').textContent = `Add contact email — ${c.name}`;
+  overlay.querySelector('.modal-sub').textContent = 'We\'ll search for emails involving this address across all connected inboxes.';
+  overlay.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Add contact email — ${escHtml(c.name)}</div>
+      <div class="modal-sub">Only emails involving these addresses will ever be pulled from your team's inboxes.</div>
+      <div class="form-group">
+        <label class="form-label">Email address</label>
+        <input class="form-input" type="email" placeholder="e.g. accounts@${c.site}" id="newContactEmail">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="restoreModal();closeModal()">Cancel</button>
+        <button class="btn-save" onclick="addContactEmail(${clientId})">Add email</button>
+      </div>
+    </div>
+  `;
+  overlay.classList.add('open');
+}
+
+function addContactEmail(clientId) {
+  const email = document.getElementById('newContactEmail').value.trim().toLowerCase();
+  if (!email || !email.includes('@')) { showToast('Please enter a valid email'); return; }
+  const c = allClients.find(x => x.id === clientId);
+  if (!c.contactEmails) c.contactEmails = [c.primaryEmail];
+  if (c.contactEmails.includes(email)) { showToast('Already added'); return; }
+  c.contactEmails.push(email);
+  restoreModal();
+  closeModal();
+  renderClientView(c);
+  showToast(`${email} added — will sync on next Gmail refresh`);
+}
+
+function restoreModal() {
+  // Rebuild the original Add Client modal structure
+  document.getElementById('addClientModal').innerHTML = `
+    <div class="modal">
+      <div class="modal-title">Add new client</div>
+      <div class="modal-sub">Connect a client to start tracking communications across your team.</div>
+      <div class="form-group">
+        <label class="form-label">Company name</label>
+        <input class="form-input" type="text" placeholder="e.g. Acme Corp" id="newClientName">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Website</label>
+        <input class="form-input" type="text" placeholder="e.g. acmecorp.com" id="newClientSite">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Primary contact email</label>
+        <input class="form-input" type="email" placeholder="e.g. marcus@acmecorp.com" id="newClientEmail">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Departments involved</label>
+        <input class="form-input" type="text" placeholder="e.g. Design, Paid Media, SEO" id="newClientDepts">
+      </div>
+      <div class="modal-actions">
+        <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn-save" onclick="addClient()">Add client</button>
+      </div>
+    </div>
+  `;
 }
 
 // ─── TABS ─────────────────────────────────────────────────────────────────────
@@ -367,25 +760,36 @@ function renderTimeline(c) {
   });
 
   let html = '<div class="timeline-container">';
-  sortedGroups.forEach(grp => {
-    html += `<div class="timeline-date-label">${grp}</div>`;
-    groups[grp].forEach(t => {
-      html += `
-        <div class="thread-item" onclick="showToast('Opening thread: ${escHtml(t.subject)}')">
-          <div class="thread-avatar ${t.senderColor}">${t.senderInitials}</div>
-          <div class="thread-body">
-            <div class="thread-top">
-              <span class="thread-name">${escHtml(t.senderName)}</span>
-              <span class="thread-dept ${DEPT_COLORS[t.dept] || 'dept-client'}">${t.dept}</span>
-              <span class="thread-time">${t.time}</span>
+
+  if (c.threads.length === 0) {
+    html += `
+      <div style="padding:40px 0;text-align:center;color:rgba(213,232,247,0.35);">
+        <div style="font-size:13px;margin-bottom:8px;">No emails synced yet for this client.</div>
+        <div style="font-size:12px;">Connect a Gmail account from the sidebar and sync to pull in matching threads.</div>
+      </div>
+    `;
+  } else {
+    sortedGroups.forEach(grp => {
+      html += `<div class="timeline-date-label">${grp}</div>`;
+      groups[grp].forEach(t => {
+        html += `
+          <div class="thread-item" onclick="showToast('Opening thread: ${escHtml(t.subject.slice(0,40))}')">
+            <div class="thread-avatar ${t.senderColor}">${t.senderInitials}</div>
+            <div class="thread-body">
+              <div class="thread-top">
+                <span class="thread-name">${escHtml(t.senderName)}</span>
+                <span class="thread-dept ${DEPT_COLORS[t.dept] || 'dept-client'}">${t.dept}</span>
+                <span class="thread-time">${t.time}</span>
+              </div>
+              <div class="thread-subject">${escHtml(t.subject)}</div>
+              <div class="thread-preview">${escHtml(t.preview)}</div>
             </div>
-            <div class="thread-subject">${escHtml(t.subject)}</div>
-            <div class="thread-preview">${escHtml(t.preview)}</div>
           </div>
-        </div>
-      `;
+        `;
+      });
     });
-  });
+  }
+
   html += '</div>';
   return html;
 }
@@ -424,7 +828,9 @@ function submitNote(clientId) {
   const c = allClients.find(x => x.id === clientId);
   const today = new Date();
   const dateStr = today.toLocaleDateString('en-GB', { day:'numeric', month:'short' });
-  c.notes.unshift({ author: 'You', date: dateStr, text });
+  // Use the first connected PM's name as author, or 'You'
+  const author = connectedPMs.length > 0 ? connectedPMs[0].name.split(' ')[0] : 'You';
+  c.notes.unshift({ author, date: dateStr, text });
   input.value = '';
   renderTab(c);
   showToast('Note added');
@@ -456,9 +862,7 @@ async function generateBrief(clientId) {
   btn.innerHTML = `
     <div class="brief-loading">
       <div class="loading-dots">
-        <div class="loading-dot"></div>
-        <div class="loading-dot"></div>
-        <div class="loading-dot"></div>
+        <div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div>
       </div>
       Generating brief...
     </div>
@@ -466,7 +870,7 @@ async function generateBrief(clientId) {
   btn.disabled = true;
   content.classList.remove('visible');
 
-  const threadSummary = c.threads.map(t =>
+  const threadSummary = c.threads.slice(0,10).map(t =>
     `[${t.dept}] ${t.senderName} — "${t.subject}" (${t.time}): ${t.preview}`
   ).join('\n');
 
@@ -481,14 +885,14 @@ Client details:
 - Last contact: ${c.lastContact}
 
 Recent email threads:
-${threadSummary}
+${threadSummary || 'No emails synced yet.'}
 
 Team notes:
 ${notesSummary || 'None'}
 
 Write a brief with exactly these 4 sections. Use plain text, no markdown symbols:
 1. RELATIONSHIP SNAPSHOT (2-3 sentences on overall relationship status)
-2. RECENT ACTIVITY (bullet the key things that have happened across departments in the last 2 weeks — what each team has been working on with this client)
+2. RECENT ACTIVITY (bullet the key things that have happened across departments in the last 2 weeks)
 3. OPEN ITEMS (bullet any pending approvals, unanswered emails, or decisions needed)
 4. TALKING POINTS (2-3 suggested topics or questions to raise in the next call)
 
@@ -508,7 +912,6 @@ Keep it brief, direct, and useful for a PM walking into a call.`;
     const data = await response.json();
     const text = data.content?.[0]?.text || 'Could not generate brief.';
 
-    // Parse sections
     const sections = [
       { key: 'RELATIONSHIP SNAPSHOT', label: 'Relationship snapshot' },
       { key: 'RECENT ACTIVITY', label: 'Recent activity' },
@@ -523,9 +926,7 @@ Keep it brief, direct, and useful for a PM walking into a call.`;
       const end = next ? text.indexOf(next.key) : text.length;
       if (start === -1) return;
       let body = text.slice(start + s.key.length, end === -1 ? text.length : end).trim();
-      // clean leading colon/newline
       body = body.replace(/^[:\-\s]+/, '').trim();
-      // Convert lines starting with - or • to styled bullets
       body = body.split('\n').map(line => {
         line = line.trim();
         if (!line) return '';
@@ -534,7 +935,6 @@ Keep it brief, direct, and useful for a PM walking into a call.`;
         }
         return `<p style="margin-bottom:8px">${escHtml(line)}</p>`;
       }).join('');
-
       html += `<div class="brief-section-title">${s.label}</div>${body}`;
     });
 
@@ -556,6 +956,7 @@ Keep it brief, direct, and useful for a PM walking into a call.`;
 // ─── MODAL ────────────────────────────────────────────────────────────────────
 
 function openModal() {
+  restoreModal();
   document.getElementById('addClientModal').classList.add('open');
 }
 
@@ -582,6 +983,7 @@ function addClient() {
     type: 'New',
     primaryContact: email || '—',
     primaryEmail: email || '',
+    contactEmails: email ? [email.toLowerCase()] : [],
     depts,
     avatarColor: AVATAR_COLORS[colorIdx],
     lastContact: 'Just added',
@@ -597,11 +999,6 @@ function addClient() {
   renderClientList(allClients);
   selectClient(newClient.id);
   showToast(`${name} added`);
-
-  // clear fields
-  ['newClientName','newClientSite','newClientEmail','newClientDepts'].forEach(id => {
-    document.getElementById(id).value = '';
-  });
 }
 
 // ─── NAV ──────────────────────────────────────────────────────────────────────
@@ -610,33 +1007,28 @@ function setNav(el) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   el.classList.add('active');
   const label = el.textContent.trim();
+
   if (label.includes('All clients')) {
-    // already showing all clients
+    renderClientList(allClients);
     return;
   }
   if (label.includes('Silence alerts')) {
     const silent = allClients.filter(c => c.silenceDays);
     renderClientList(silent);
-    const main = document.getElementById('main');
-    main.innerHTML = `
+    document.getElementById('main').innerHTML = `
       <div class="empty-state">
-        <div class="empty-icon">
-          <svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        </div>
+        <div class="empty-icon"><svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
         <div class="empty-title">${silent.length} client${silent.length !== 1 ? 's' : ''} flagged</div>
-        <div class="empty-sub">Select a client on the left to view their silence alert and follow-up options.</div>
-      </div>
-    `;
+        <div class="empty-sub">Select a client on the left to view their alert and send a follow-up.</div>
+      </div>`;
     return;
   }
   if (label.includes('Recent emails')) {
-    const main = document.getElementById('main');
-    main.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div><div class="empty-title">Recent emails</div><div class="empty-sub">Connect your Gmail workspace to see all recent client emails in one feed.</div></div>`;
+    document.getElementById('main').innerHTML = `<div class="empty-state"><div class="empty-icon"><svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg></div><div class="empty-title">Recent emails</div><div class="empty-sub">Connect your Gmail from the sidebar to pull in emails matching your client list.</div></div>`;
     return;
   }
   if (label.includes('Activity')) {
-    const main = document.getElementById('main');
-    main.innerHTML = `<div class="empty-state"><div class="empty-icon"><svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="empty-title">Activity feed</div><div class="empty-sub">A live feed of all outgoing and incoming client emails across every department will appear here once Gmail is connected.</div></div>`;
+    document.getElementById('main').innerHTML = `<div class="empty-state"><div class="empty-icon"><svg width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="empty-title">Activity feed</div><div class="empty-sub">A live feed of all outgoing and incoming client emails across every department will appear here once Gmail is connected.</div></div>`;
     return;
   }
 }
@@ -644,7 +1036,7 @@ function setNav(el) {
 // ─── UTILS ────────────────────────────────────────────────────────────────────
 
 function initials(name) {
-  return name.split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
+  return (name || '??').split(' ').map(w => w[0]).join('').slice(0,2).toUpperCase();
 }
 
 function escHtml(str) {
@@ -668,7 +1060,6 @@ function showToast(msg) {
   }, 2800);
 }
 
-// Close modal on overlay click
 document.getElementById('addClientModal').addEventListener('click', function(e) {
   if (e.target === this) closeModal();
 });

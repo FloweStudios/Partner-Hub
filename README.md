@@ -1,217 +1,195 @@
-# Partner Hub — Longhouse
+# Partner Hub — Longhouse (v2)
 
-A shared client communication hub for your team. See every email, note, and alert for every client — across every department — in one place.
-
----
-
-## What it does
-
-- **Unified timeline** — all emails to/from a client, tagged by department and PM, in one chronological feed
-- **Team notes** — sticky context visible to every PM ("Marcus prefers calls over email")
-- **Silence alerts** — flags clients who haven't been contacted in X days
-- **AI pre-meeting brief** — one click generates a summary of the relationship, open items, and talking points
-- **Add clients** — quickly register new clients and the departments involved
+A shared client communication hub. Each PM connects their own Gmail — we only ever pull emails that involve addresses you've registered against a client. Nothing else is accessed.
 
 ---
 
-## Stack
+## How email sync works
 
-| Layer | Tool | Cost |
-|---|---|---|
-| Frontend | HTML/CSS/JS (no framework needed) | Free |
-| Hosting | Vercel | Free |
-| Email sync | Gmail API (domain-wide) | Free |
-| Database | Supabase | Free tier |
-| AI briefs | Claude API (Haiku 4.5) | ~$2–10/month |
+### Individual consent, not admin access
 
----
+Each PM clicks **"Connect my Gmail"** in the sidebar. This opens Google's own OAuth consent screen, where the PM reads exactly what access they're granting and clicks Allow or Deny. There is no admin override — if a PM doesn't connect, their inbox is never touched.
 
-## Setup — step by step
+### Filtered by client email addresses only
 
-### 1. Deploy to Vercel (5 minutes)
+When a PM syncs, the app builds a Gmail search query from your client list:
 
-1. Go to [vercel.com](https://vercel.com) and sign up with your Google account
-2. Click **Add New → Project**
-3. Upload this folder (drag and drop, or connect a GitHub repo)
-4. Click **Deploy** — you'll get a live URL like `partner-hub.vercel.app`
+```
+(from:marcus@acmecorp.com OR to:marcus@acmecorp.com OR from:yuki@novarainc.com ...) newer_than:30d
+```
 
-That's it. The app is live.
+Only threads matching at least one registered client address are fetched. Random emails, personal threads, internal team emails — none of that is ever requested or stored.
+
+### Adding more contact emails
+
+Each client has a `contactEmails` array. You can add aliases, CC addresses, or additional contacts per client using the **"Add email"** button on their profile. The next sync will pick up threads involving those addresses too.
 
 ---
 
-### 2. Set up Gmail API (20 minutes)
+## Setup
 
-This lets the hub read emails across all your team's inboxes automatically.
+### 1. Deploy to Vercel
+
+1. Go to [vercel.com](https://vercel.com), sign up, click **Add New → Project**
+2. Upload this folder or connect a GitHub repo
+3. Click **Deploy**
+
+---
+
+### 2. Set up Google OAuth (15 minutes)
+
+This is simpler than domain-wide delegation — no Google Workspace admin required.
 
 **Step 1 — Create a Google Cloud project**
 
 1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Click **Select a project → New Project**
-3. Name it `partner-hub` and click **Create**
+2. Click **Select a project → New Project**, name it `partner-hub`, create it
 
 **Step 2 — Enable Gmail API**
 
-1. In the left menu go to **APIs & Services → Library**
-2. Search for **Gmail API** and click **Enable**
+1. Go to **APIs & Services → Library**
+2. Search **Gmail API**, click **Enable**
 
-**Step 3 — Create a Service Account**
+**Step 3 — Create OAuth credentials**
 
 1. Go to **APIs & Services → Credentials**
-2. Click **Create Credentials → Service Account**
-3. Name it `partner-hub-sync`, click through and **Done**
-4. Click the service account you just created
-5. Go to **Keys → Add Key → Create new key → JSON**
-6. Download the JSON file — keep it safe, don't commit it to GitHub
+2. Click **Create Credentials → OAuth client ID**
+3. Application type: **Web application**
+4. Name: `Partner Hub`
+5. Authorised JavaScript origins: add your Vercel URL (e.g. `https://partner-hub.vercel.app`) and `http://localhost:3000` for local testing
+6. Click **Create** — copy the **Client ID**
 
-**Step 4 — Enable Domain-Wide Delegation**
+**Step 4 — Configure consent screen**
 
-1. Still on the service account page, click **Edit**
-2. Check **Enable Google Workspace Domain-wide Delegation**
-3. Save
+1. Go to **APIs & Services → OAuth consent screen**
+2. User type: **Internal** (this means only people in your Google Workspace org can sign in — no external users)
+3. Fill in app name (`Partner Hub`), support email, and developer email
+4. Add scope: `https://www.googleapis.com/auth/gmail.readonly`
+5. Save
 
-**Step 5 — Authorise in Google Workspace Admin**
+**Step 5 — Add your Client ID to the app**
 
-1. Go to [admin.google.com](https://admin.google.com)
-2. Navigate to **Security → Access and data control → API controls**
-3. Click **Manage Domain Wide Delegation → Add new**
-4. Paste your service account's **Client ID** (from the JSON file, field `client_id`)
-5. Add this OAuth scope: `https://www.googleapis.com/auth/gmail.readonly`
-6. Click **Authorise**
-
-Your app can now read emails from all inboxes on your domain — no individual sign-in needed.
-
----
-
-### 3. Set up Supabase (10 minutes)
-
-1. Go to [supabase.com](https://supabase.com) and create a free account
-2. Click **New project**, name it `partner-hub`
-3. Once created, go to **SQL Editor** and run this schema:
-
-```sql
--- Clients table
-create table clients (
-  id uuid default gen_random_uuid() primary key,
-  name text not null,
-  site text,
-  primary_contact text,
-  primary_email text,
-  since text,
-  type text,
-  depts text[],
-  avatar_color text,
-  created_at timestamp default now()
-);
-
--- Team notes table
-create table notes (
-  id uuid default gen_random_uuid() primary key,
-  client_id uuid references clients(id) on delete cascade,
-  author text not null,
-  text text not null,
-  created_at timestamp default now()
-);
-
--- Email threads cache table
-create table threads (
-  id text primary key,
-  client_id uuid references clients(id) on delete cascade,
-  sender_name text,
-  sender_email text,
-  dept text,
-  direction text,
-  subject text,
-  preview text,
-  received_at timestamp,
-  gmail_thread_id text
-);
-
--- Silence rules table
-create table silence_rules (
-  id uuid default gen_random_uuid() primary key,
-  client_id uuid references clients(id) on delete cascade,
-  threshold_days integer default 7
-);
-```
-
-4. Go to **Settings → API** and copy:
-   - **Project URL** → your `SUPABASE_URL`
-   - **anon public key** → your `SUPABASE_ANON_KEY`
-
----
-
-### 4. Add your API keys (5 minutes)
-
-In your Vercel project, go to **Settings → Environment Variables** and add:
-
-| Variable | Where to get it |
-|---|---|
-| `ANTHROPIC_API_KEY` | [console.anthropic.com](https://console.anthropic.com) → API Keys |
-| `SUPABASE_URL` | Supabase → Settings → API |
-| `SUPABASE_ANON_KEY` | Supabase → Settings → API |
-| `GOOGLE_SERVICE_ACCOUNT_JSON` | Contents of the JSON file from step 2 |
-
-Then redeploy — Vercel picks up env vars automatically.
-
----
-
-### 5. Connect Gmail sync (when you're ready to go live)
-
-The current version uses sample data so you can test everything first. When you're ready to wire in real emails, update `app.js` to call your Supabase backend instead of the local `clients` array.
-
-A simple sync function to add to a Vercel serverless function (`/api/sync-gmail.js`):
+Open `app.js` and replace line 3:
 
 ```javascript
-// /api/sync-gmail.js
-// Runs on a cron or webhook — fetches new emails and stores them in Supabase
+const GOOGLE_CLIENT_ID = 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com';
+```
 
-import { google } from 'googleapis';
-import { createClient } from '@supabase/supabase-js';
+with your actual Client ID from step 3.
 
-const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_ANON_KEY);
+That's it — no service accounts, no domain-wide delegation, no admin setup.
 
-export default async function handler(req, res) {
-  const serviceAccount = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
-  
-  const auth = new google.auth.JWT(
-    serviceAccount.client_email,
-    null,
-    serviceAccount.private_key,
-    ['https://www.googleapis.com/auth/gmail.readonly'],
-    'your-pm@yourdomain.com' // impersonate this user
-  );
+---
 
-  const gmail = google.gmail({ version: 'v1', auth });
+### 3. Add your Anthropic API key
 
-  // Fetch recent messages
-  const messages = await gmail.users.messages.list({
-    userId: 'me',
-    maxResults: 50,
-    q: 'newer_than:7d'
-  });
+For the AI pre-meeting brief to work, you need a Claude API key.
 
-  // Process and store in Supabase...
-  // (match sender/recipient to client by email domain)
-  
-  res.json({ synced: messages.data.messages?.length || 0 });
+Since this is a static site (no backend), the simplest path for a small internal tool:
+
+**Option A — Put it directly in app.js (easiest, fine for internal tools)**
+
+In `app.js`, find the `generateBrief` function and add your key to the fetch headers:
+
+```javascript
+headers: {
+  'Content-Type': 'application/json',
+  'x-api-key': 'YOUR_ANTHROPIC_API_KEY',
+  'anthropic-version': '2023-06-01',
 }
 ```
 
-Set this up as a Vercel cron job to run every 30 minutes and you'll have live email data.
+This is acceptable for an internal tool your team uses directly. The key is visible in the browser, but since only your team has access to the app, the risk is low.
+
+**Option B — Vercel serverless function (more secure)**
+
+Create `/api/brief.js` in your project:
+
+```javascript
+export default async function handler(req, res) {
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': process.env.ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(req.body)
+  });
+  const data = await response.json();
+  res.json(data);
+}
+```
+
+Then in `app.js`, change the fetch URL from `https://api.anthropic.com/v1/messages` to `/api/brief`.
+
+Add `ANTHROPIC_API_KEY` to your Vercel environment variables.
 
 ---
 
-## Iterating with Claude
+### 4. Map your team's emails to departments
 
-This project is designed to be easy to vibe-code. When you want to add a feature, paste the relevant file into Claude and describe what you want.
+In `app.js`, find the `guessDeptFromPM` function and update the map with your real team:
 
-**Good prompts to use:**
+```javascript
+const map = {
+  'sarah@yourdomain.com':  'Design',
+  'jamie@yourdomain.com':  'Paid Media',
+  'priya@yourdomain.com':  'SEO',
+  'dan@yourdomain.com':    'Dev',
+};
+```
 
-- *"Add a department filter to the sidebar so I can show only threads from Design"*
-- *"Add a health score to each client card based on days since last contact and number of open items"*
-- *"Build a settings page where I can configure how many days before a silence alert triggers"*
-- *"Add a handoff summary feature — when I click handoff, generate an AI summary of the relationship for a new PM"*
-- *"Replace the sample data with real Supabase queries using this schema: [paste schema]"*
+This is how the timeline knows to label a thread from Sarah as "Design" automatically.
+
+---
+
+### 5. Add your real clients
+
+In `app.js`, update the `clients` array at the top. For each client, make sure `contactEmails` lists every email address you've ever received mail from or sent mail to for that client:
+
+```javascript
+{
+  id: 1,
+  name: 'Acme Corp',
+  site: 'acmecorp.com',
+  primaryContact: 'Marcus Webb',
+  primaryEmail: 'marcus@acmecorp.com',
+  contactEmails: [
+    'marcus@acmecorp.com',
+    'accounts@acmecorp.com',    // billing contact
+    'claire@acmecorp.com',      // secondary contact
+  ],
+  depts: ['Design', 'Paid Media'],
+  // ... rest of fields
+}
+```
+
+The more complete this list, the better the sync coverage.
+
+---
+
+## What each PM does on first use
+
+1. Open the app
+2. Click **"Connect my Gmail"** in the bottom-left sidebar
+3. Google's consent screen appears — they read it, click **Allow**
+4. Their inbox is searched for emails matching your client list
+5. Matching threads appear in the timeline immediately
+
+That's it. They can disconnect at any time by clicking the × next to their name.
+
+---
+
+## Privacy design decisions
+
+| Decision | Reason |
+|---|---|
+| Individual OAuth, not domain-wide | PMs explicitly choose to participate. No one is opted in without consent. |
+| Read-only Gmail scope | The app can never send, delete, or modify any email. |
+| Client email filter | We never fetch or store any email that isn't related to a registered client. Personal emails, internal team emails — none of it is touched. |
+| Tokens stored in localStorage | Tokens are local to that browser/device. They expire in 1 hour. We never send them to a server. |
+| Internal OAuth consent screen | Only people in your Google Workspace org can authorise — no external accounts. |
 
 ---
 
@@ -219,24 +197,32 @@ This project is designed to be easy to vibe-code. When you want to add a feature
 
 ```
 partner-hub/
-├── index.html      ← Main app shell and modal
-├── style.css       ← All styles (Longhouse brand tokens)
-├── app.js          ← All logic, data, AI brief generation
+├── index.html      ← App shell, sidebar with Gmail connect panel
+├── style.css       ← Longhouse brand styles (unchanged)
+├── app.js          ← All logic: OAuth flow, email filtering, sync, AI brief
 └── README.md       ← This file
 ```
 
-When you're ready to grow into a proper Next.js app with auth, just ask Claude to scaffold it — the design and logic here can be ported directly.
+---
+
+## Iterating with Claude
+
+Good prompts to extend this:
+
+- *"Add a 'Sync all' button that refreshes all connected PMs at once"*
+- *"When a PM disconnects their Gmail, remove their threads from the timeline"*
+- *"Add a settings panel where each PM can set a silence threshold (e.g. 7 days) per client"*
+- *"Store client data and notes in Supabase instead of the local array"*
+- *"Show which PM's Gmail each thread came from in the timeline"*
 
 ---
 
-## Costs summary
+## Cost summary
 
-| Service | Free tier | Paid starts at |
+| Service | Free tier | Notes |
 |---|---|---|
-| Vercel | 100GB bandwidth/month | $20/month |
-| Supabase | 500MB database, 2GB transfer | $25/month |
+| Vercel | 100GB bandwidth/month | Free for small teams |
 | Gmail API | Unlimited | Free forever |
-| Claude API | — | ~$2–10/month for your usage |
-| **Total** | **$0** | **~$2–10/month** |
-
-A team of 2–5 will likely stay on the free tier for everything except the AI, which will cost a few dollars a month.
+| Google OAuth | Unlimited | Free forever |
+| Claude API | — | ~$2–10/month |
+| **Total** | **~$2–10/month** | Just the AI |

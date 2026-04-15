@@ -353,18 +353,19 @@ async function syncEmailsForPM(pm) {
       await db('upsertThreads', { threads: threadRows });
     }
 
-    // Reload threads for the active client if it was affected
-    if (activeClientId) {
-      const affected = threadRows.some(t => t.client_id === activeClientId);
-      if (affected) {
-        const c = allClients.find(x => x.id === activeClientId);
-        if (c) {
-          c.threads = await loadThreadsForClient(activeClientId);
-          c.lastContact = c.threads[0]?.time || '—';
-          renderClientView(c);
-        }
-      }
+    // Reload threads for every affected client and refresh the view
+    const affectedClientIds = [...new Set(threadRows.map(t => t.client_id))];
+    for (const cid of affectedClientIds) {
+      const c = allClients.find(x => x.id === cid);
+      if (!c) continue;
+      c.threads = await loadThreadsForClient(cid);
+      c.lastContact = c.threads[0]?.time || '—';
+      // Re-render the main view if this is the currently selected partner
+      if (cid === activeClientId) renderClientView(c);
     }
+
+    // Refresh sidebar so lastContact times update
+    renderClientList(allClients);
 
     showToast(`Synced ${threadRows.length} thread${threadRows.length !== 1 ? 's' : ''} for ${pm.name}`);
 
@@ -446,11 +447,11 @@ async function selectClient(id) {
   if (!c) return;
   c.unread = false;
 
-  // Load threads and notes from Supabase on first select
-  if (c.threads.length === 0) {
-    c.threads = await loadThreadsForClient(id);
-    if (c.threads.length > 0) c.lastContact = c.threads[0].time;
-  }
+  // Always reload threads fresh from Supabase — covers post-sync updates
+  c.threads = await loadThreadsForClient(id);
+  if (c.threads.length > 0) c.lastContact = c.threads[0].time;
+
+  // Notes only load once — they don't change via sync
   if (c.notes.length === 0) {
     c.notes = await loadNotesForClient(id);
   }

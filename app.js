@@ -22,6 +22,32 @@ let activeTab = 'timeline';
 // Gmail tokens stay in localStorage only — never sent to any server
 let connectedPMs = JSON.parse(localStorage.getItem('connectedPMs') || '[]');
 
+// Auto-sync interval handles — keyed by PM email so each PM has their own timer
+const syncIntervals = {};
+const SYNC_INTERVAL_MS = 2 * 60 * 1000; // every 2 minutes
+
+function startAutoSync(pm) {
+  // Clear any existing interval for this PM first
+  if (syncIntervals[pm.email]) clearInterval(syncIntervals[pm.email]);
+  syncIntervals[pm.email] = setInterval(() => {
+    // Re-read from localStorage in case token was refreshed
+    const fresh = JSON.parse(localStorage.getItem('connectedPMs') || '[]')
+      .find(p => p.email === pm.email);
+    if (!fresh || Date.now() > fresh.tokenExpiry) {
+      stopAutoSync(pm.email);
+      return;
+    }
+    syncEmailsForPM(fresh);
+  }, SYNC_INTERVAL_MS);
+}
+
+function stopAutoSync(email) {
+  if (syncIntervals[email]) {
+    clearInterval(syncIntervals[email]);
+    delete syncIntervals[email];
+  }
+}
+
 // ─── DB HELPERS ──────────────────────────────────────────────────────────────
 // All DB calls go through /api/db — Supabase keys never touch the browser
 
@@ -45,6 +71,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   await Promise.all([loadClients(), loadPMDepartments()]);
   renderConnectedPMs();
   if (allClients.length > 0) selectClient(allClients[0].id);
+
+  // Resume auto-sync for any PMs who were already connected before page load
+  connectedPMs.forEach(pm => {
+    if (Date.now() < pm.tokenExpiry) startAutoSync(pm);
+  });
 });
 
 // ─── LOAD DATA FROM SUPABASE ─────────────────────────────────────────────────
@@ -211,6 +242,7 @@ async function connectMyGmail() {
       renderConnectedPMs();
       showToast(`${pm.name}'s Gmail connected`);
       syncEmailsForPM(pm);
+      startAutoSync(pm);
     }
   });
 
@@ -218,6 +250,7 @@ async function connectMyGmail() {
 }
 
 function disconnectPM(email) {
+  stopAutoSync(email);
   connectedPMs = connectedPMs.filter(p => p.email !== email);
   localStorage.setItem('connectedPMs', JSON.stringify(connectedPMs));
   renderConnectedPMs();
@@ -400,7 +433,7 @@ function renderConnectedPMs() {
         <div style="width:24px;height:24px;border-radius:50%;background:${expired ? 'rgba(239,159,39,0.2)' : 'rgba(34,187,242,0.15)'};display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:${expired ? '#EF9F27' : 'var(--accent-1)'};flex-shrink:0;">${pm.initials}</div>
         <div style="flex:1;min-width:0;">
           <div style="font-size:12px;font-weight:600;color:${expired ? '#EF9F27' : 'var(--white)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(pm.name)}</div>
-          <div style="font-size:10px;color:rgba(213,232,247,0.4);">${expired ? 'Token expired' : 'Connected · read-only'}</div>
+          <div style="font-size:10px;color:rgba(213,232,247,0.4);">${expired ? 'Token expired' : syncIntervals[pm.email] ? 'Auto-syncing every 2 min' : 'Connected · read-only'}</div>
         </div>
         ${expired
           ? `<button onclick="connectMyGmail()" style="font-size:10px;font-weight:700;color:#EF9F27;background:rgba(239,159,39,0.1);border:1px solid rgba(239,159,39,0.2);border-radius:4px;padding:3px 7px;cursor:pointer;font-family:var(--font)">Refresh</button>`
@@ -585,7 +618,7 @@ function renderTimeline(c) {
     html += `<div class="timeline-date-label">${grp}</div>`;
     groups[grp].forEach(t => {
       html += `
-        <div class="thread-item">
+        <div class="thread-item" onclick="openThread('${t.gmailThreadId}')" style="cursor:pointer;">
           <div class="thread-avatar ${t.senderColor}">${escHtml(t.senderInitials)}</div>
           <div class="thread-body">
             <div class="thread-top">
@@ -905,6 +938,14 @@ function setNav(el) {
       </div>`;
     return;
   }
+}
+
+// ─── OPEN IN GMAIL ───────────────────────────────────────────────────────────
+
+function openThread(gmailThreadId) {
+  if (!gmailThreadId) return;
+  // Opens the thread directly in Gmail — works for both sent and received
+  window.open(`https://mail.google.com/mail/u/0/#all/${gmailThreadId}`, '_blank');
 }
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────

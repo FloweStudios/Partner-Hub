@@ -244,19 +244,30 @@ async function syncEmailsForPM(pm) {
   // Gmail query: separate from:/to: clauses — the {from:x to:x} shorthand is not supported
   const fromClauses = allContactEmails.map(e => `from:${e}`);
   const toClauses   = allContactEmails.map(e => `to:${e}`);
-  const query = `(${[...fromClauses, ...toClauses].join(' OR ')}) newer_than:30d`;
+  const query = `(${[...fromClauses, ...toClauses].join(' OR ')}) newer_than:90`;
 
   showToast(`Syncing ${pm.name}'s emails...`);
 
   try {
+    console.log('[Sync] Gmail query:', query);
+
     const listRes = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/threads?q=${encodeURIComponent(query)}&maxResults=50`,
       { headers: { Authorization: `Bearer ${pm.accessToken}` } }
     );
     const listData = await listRes.json();
 
+    console.log('[Sync] Gmail response:', JSON.stringify(listData));
+
+    // If Gmail returned an API error object, surface it clearly
+    if (listData.error) {
+      console.error('[Sync] Gmail API error:', listData.error);
+      showToast(`Gmail error: ${listData.error.message}`);
+      return;
+    }
+
     if (!listData.threads?.length) {
-      showToast(`No matching emails found for ${pm.name}`);
+      showToast(`No matching emails found — check console for query details`);
       return;
     }
 
@@ -328,6 +339,8 @@ async function syncEmailsForPM(pm) {
         time_display: formatRelativeTime(date),
       });
     });
+
+    console.log(`[Sync] Matched ${threadRows.length} thread rows to partners`);
 
     // Save to Supabase — duplicates are silently ignored
     if (threadRows.length > 0) {
